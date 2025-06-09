@@ -21,7 +21,7 @@ clean:
 	rm -rf $(BUILD_DIR)
 
 build-win: prepare export-db-win
-	GOOS=windows GOARCH=amd64 go build -o $(BUILD_DIR)/$(BINARY_NAME).exe ./
+	CGO_ENABLED=1 GOOS=windows GOARCH=amd64 go build -o $(BUILD_DIR)/$(BINARY_NAME).exe ./
 
 export-db-win: prepare
-	GOOS=windows GOARCH=amd64 go build -o $(BUILD_DIR)/$(EXPORT_DB_BINARY).exe ./cmd/exportDb.go
+	CGO_ENABLED=1 GOOS=windows GOARCH=amd64 go build -o $(BUILD_DIR)/$(EXPORT_DB_BINARY).exe ./cmd/exportDb.go

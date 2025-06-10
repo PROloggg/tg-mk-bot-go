@@ -2,7 +2,10 @@ package main
 
 import (
 	"encoding/csv"
+	"log"
 	"os"
+	"sort"
+	"strings"
 )
 
 var Speakers []Speaker
@@ -12,7 +15,12 @@ func LoadSpeakersFromCSV(path string) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func(file *os.File) {
+		err := file.Close()
+		if err != nil {
+			log.Println("Ошибка чтения файла курсов:", err)
+		}
+	}(file)
 
 	reader := csv.NewReader(file)
 	records, err := reader.ReadAll()
@@ -22,19 +30,38 @@ func LoadSpeakersFromCSV(path string) error {
 
 	speakersMap := make(map[string]*Speaker)
 	for _, rec := range records[1:] { // пропускаем заголовок
-		name, city, date, program := rec[0], rec[1], rec[2], rec[3]
-		if speakersMap[name] == nil {
-			speakersMap[name] = &Speaker{Name: name}
+		name, cityRaw, program := rec[0], rec[1], rec[2]
+
+		// Разбиваем cityRaw по ";" и убираем пробелы
+		cities := strings.Split(cityRaw, ";")
+		for _, c := range cities {
+			city := strings.TrimSpace(c)
+			if city == "" {
+				continue // пропустить пустые строки
+			}
+
+			if speakersMap[name] == nil {
+				speakersMap[name] = &Speaker{Name: name}
+			}
+
+			course := Course{
+				City:    city,
+				Program: program,
+			}
+
+			speakersMap[name].Courses = append(speakersMap[name].Courses, course)
 		}
-		speakersMap[name].Courses = append(speakersMap[name].Courses, Course{
-			City:    city,
-			Date:    date,
-			Program: program,
-		})
 	}
+
 	Speakers = nil
 	for _, s := range speakersMap {
 		Speakers = append(Speakers, *s)
 	}
+
+	// Сортировка по алфавиту
+	sort.Slice(Speakers, func(i, j int) bool {
+		return Speakers[i].Name < Speakers[j].Name
+	})
+
 	return nil
 }

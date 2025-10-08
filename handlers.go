@@ -4,10 +4,11 @@ import (
 	"app/db"
 	tools "app/handlers"
 	"fmt"
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"log"
 	"strconv"
 	"strings"
+
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
 var userSpeakerDir = make(map[int64]string)
@@ -15,11 +16,11 @@ var userSpeakerDir = make(map[int64]string)
 const (
 	bookCourseInfoPath         = "data/Инструкция по бронированию.txt"
 	greetingMessage            = "Привет! 👋\nЯ помогу выбрать лучший курс😌\nВыбери, что интересно, и мы сразу подберём варианты!"
-	contactConfirmationMessage = "Спасибо! 📲 Мы записали ваш номер,\nМенеджер скоро с вами свяжется."
-	speakerPromptTemplate      = "Отличный выбор, %s! 🎯\nТеперь выбери город 🌇\nГде тебе будет удобно заниматься?"
+	contactConfirmationMessage = "Спасибо! 📲 Мы записали ваш номер,\nМенеджер скоро с вами свяжется. 😉"
+	speakerPromptTemplate      = "Отличный выбор, %s! 🎯\nТеперь выбери город 🌇\nГде будет удобно пройти обучение?"
 	courseHeaderTemplate       = "Отправляю программу курса «%s»"
 	nextStepMessage            = "Что делаем дальше?"
-	bookCourseFallbackMessage  = "Не удалось найти информацию о бронировании курса. Напишите нам, пожалуйста."
+	bookCourseFallbackMessage  = "Не удалось найти информацию о бронировании курса. Напишите нам, пожалуйста. @krasivyimk"
 )
 
 func HandleMessage(bot *tgbotapi.BotAPI, update tgbotapi.Update) {

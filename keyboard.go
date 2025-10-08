@@ -2,8 +2,9 @@ package main
 
 import (
 	"fmt"
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"strconv"
+
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
 func SpeakerKeyboard() tgbotapi.InlineKeyboardMarkup {
@@ -31,8 +32,8 @@ func CourseKeyboard(speakerIdx int) tgbotapi.InlineKeyboardMarkup {
 func CourseActionKeyboard() tgbotapi.InlineKeyboardMarkup {
 	return tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("📝 Записаться на курс", "book_course"),
-			tgbotapi.NewInlineKeyboardButtonData("🎒 Что взять с собой", "needed_tools"),
+			tgbotapi.NewInlineKeyboardButtonData("📝 Оставить заявку", "book_course"),
+			tgbotapi.NewInlineKeyboardButtonData("❓ Как оплатить", "needed_tools"),
 		),
 	)
 }
@@ -40,7 +41,7 @@ func CourseActionKeyboard() tgbotapi.InlineKeyboardMarkup {
 func ContactKeyboard() tgbotapi.ReplyKeyboardMarkup {
 	return tgbotapi.NewReplyKeyboard(
 		tgbotapi.NewKeyboardButtonRow(
-			tgbotapi.NewKeyboardButtonContact("Поделиться номером"),
+			tgbotapi.NewKeyboardButtonContact("📱 Поделиться номером 📱"),
 		),
 	)
 }

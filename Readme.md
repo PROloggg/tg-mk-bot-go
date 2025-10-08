@@ -54,6 +54,8 @@
 make build
 
 make build-win
+
+go build -o build/course-bot.exe ./
 ```
 
 ## Dev запуск

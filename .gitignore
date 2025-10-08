@@ -3,3 +3,4 @@
 build
 /db/clients.db
 /data/courses.csv
+.vscode

@@ -41,7 +41,7 @@ func HandleMessage(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 		return
 	}
 
-	msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Привет! 👋 Я помогу тебе найти информацию о наших курсах. Давай начнем!")
+	msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Привет! 👋 \nЯ помогу тебе выбрать лучший курс 😌\nВыбери, что интересно, и мы сразу подберём варианты!")
 	msg.ReplyMarkup = SpeakerKeyboard()
 	tools.SendAndLog(bot, msg)
 }

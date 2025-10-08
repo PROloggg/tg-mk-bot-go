@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"strconv"
 )
@@ -9,7 +10,8 @@ import (
 func SpeakerKeyboard() tgbotapi.InlineKeyboardMarkup {
 	var rows [][]tgbotapi.InlineKeyboardButton
 	for i, s := range Speakers {
-		btn := tgbotapi.NewInlineKeyboardButtonData(s.Name, "speaker_"+strconv.Itoa(i))
+		label := fmt.Sprintf("🎓 %s ✂️", s.Name)
+		btn := tgbotapi.NewInlineKeyboardButtonData(label, "speaker_"+strconv.Itoa(i))
 		rows = append(rows, tgbotapi.NewInlineKeyboardRow(btn))
 	}
 	return tgbotapi.NewInlineKeyboardMarkup(rows...)

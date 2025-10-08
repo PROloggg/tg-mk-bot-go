@@ -6,7 +6,6 @@ import (
 	"strconv"
 )
 
-// SpeakerKeyboard Клавиатура с кнопками Спикеров
 func SpeakerKeyboard() tgbotapi.InlineKeyboardMarkup {
 	var rows [][]tgbotapi.InlineKeyboardButton
 	for i, s := range Speakers {
@@ -17,7 +16,6 @@ func SpeakerKeyboard() tgbotapi.InlineKeyboardMarkup {
 	return tgbotapi.NewInlineKeyboardMarkup(rows...)
 }
 
-// CourseKeyboard Клавиатура с кнопками Курсов для выбранного Спикера
 func CourseKeyboard(speakerIdx int) tgbotapi.InlineKeyboardMarkup {
 	var rows [][]tgbotapi.InlineKeyboardButton
 	for i, c := range Speakers[speakerIdx].Courses {
@@ -30,21 +28,19 @@ func CourseKeyboard(speakerIdx int) tgbotapi.InlineKeyboardMarkup {
 	return tgbotapi.NewInlineKeyboardMarkup(rows...)
 }
 
-// CourseActionKeyboard Клавиатура с кнопками "Забронировать место" и "Инструменты для обучения"
 func CourseActionKeyboard() tgbotapi.InlineKeyboardMarkup {
 	return tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("🔒 Забронировать место", "book_course"),
-			tgbotapi.NewInlineKeyboardButtonData("🧰 Инструменты для обучения", "needed_tools"),
+			tgbotapi.NewInlineKeyboardButtonData("📝 Записаться на курс", "book_course"),
+			tgbotapi.NewInlineKeyboardButtonData("🎒 Что взять с собой", "needed_tools"),
 		),
 	)
 }
 
-// ContactKeyboard Обычная клавиатура с кнопкой "Отправить телефон"
 func ContactKeyboard() tgbotapi.ReplyKeyboardMarkup {
 	return tgbotapi.NewReplyKeyboard(
 		tgbotapi.NewKeyboardButtonRow(
-			tgbotapi.NewKeyboardButtonContact("📞 Отправить телефон"),
+			tgbotapi.NewKeyboardButtonContact("Поделиться номером"),
 		),
 	)
 }

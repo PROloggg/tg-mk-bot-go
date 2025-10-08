@@ -3,6 +3,7 @@ package main
 import (
 	"app/db"
 	tools "app/handlers"
+	"fmt"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"log"
 	"strconv"
@@ -10,6 +11,16 @@ import (
 )
 
 var userSpeakerDir = make(map[int64]string)
+
+const (
+	bookCourseInfoPath         = "data/Инструкция по бронированию.txt"
+	greetingMessage            = "Привет! 👋\nЯ помогу тебе выбрать лучший курс.\nВыбери, что интересно, и мы сразу подберём варианты!"
+	contactConfirmationMessage = "Спасибо! 📲 Мы записали твой номер, менеджер скоро свяжется."
+	speakerPromptMessage       = "Отличный выбор! 🎯\nТеперь выбери город 📍\nГде тебе будет удобно заниматься?"
+	courseHeaderTemplate       = "Отправляю программу курса «%s» — посмотри материалы ниже."
+	nextStepMessage            = "Что делаем дальше?"
+	bookCourseFallbackMessage  = "Не удалось найти информацию о бронировании курса. Напишите нам, пожалуйста."
+)
 
 func HandleMessage(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 	user := update.Message.From
@@ -20,28 +31,36 @@ func HandleMessage(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 		phone = update.Message.Contact.PhoneNumber
 	}
 
-	// Сохраняем пользователя в базу
 	err := db.UpsertUser(
 		dbConn,
 		chatID,
-		phone, // телефон можно запросить позже
-		user.FirstName+" "+user.LastName,
-		"", // город можно запросить позже
-		"", // куратор можно запросить позже
+		phone,
+		strings.TrimSpace(user.FirstName+" "+user.LastName),
+		"",
+		"",
 	)
 	if err != nil {
-		log.Println("Ошибка сохранения пользователя:", err)
+		log.Println("failed to upsert user:", err)
 	}
 
 	if update.Message.Contact != nil {
-		// Если пользователь отправил контакт, благодарим его
-		msg := tgbotapi.NewMessage(chatID, "💇‍♀️ Спасибо, ждем вас на мастер-классе! 💇🏻")
+		msg := tgbotapi.NewMessage(chatID, contactConfirmationMessage)
 		tools.SendAndLog(bot, msg)
 
+		contactName := strings.TrimSpace(user.FirstName + " " + user.LastName)
+		if c := update.Message.Contact; c != nil {
+			candidate := strings.TrimSpace(c.FirstName + " " + c.LastName)
+			if candidate != "" {
+				contactName = candidate
+			}
+		}
+		setSessionContact(chatID, phone, contactName)
+
+		trySyncBitrixDeal(bot, chatID)
 		return
 	}
 
-	msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Привет! 👋 \nЯ помогу тебе выбрать лучший курс 😌\nВыбери, что интересно, и мы сразу подберём варианты!")
+	msg := tgbotapi.NewMessage(update.Message.Chat.ID, greetingMessage)
 	msg.ReplyMarkup = SpeakerKeyboard()
 	tools.SendAndLog(bot, msg)
 }
@@ -49,16 +68,16 @@ func HandleMessage(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 func HandleCallback(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 	data := update.CallbackQuery.Data
 	chatID := update.CallbackQuery.Message.Chat.ID
-	switch {
 
+	switch {
 	case strings.HasPrefix(data, "speaker_"):
 		pickSpeaker(data, bot, chatID, update)
 	case strings.HasPrefix(data, "course_"):
 		pickCourse(data, bot, chatID, update)
 	case data == "book_course":
-		text, err := tools.ReadTextFile("data/Инструкция по бронированию.txt")
+		text, err := tools.ReadTextFile(bookCourseInfoPath)
 		if err != nil {
-			text = "Не удалось загрузить инструкцию по бронированию."
+			text = bookCourseFallbackMessage
 		}
 
 		msg := tgbotapi.NewMessage(chatID, text)
@@ -71,59 +90,61 @@ func HandleCallback(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 		tools.SendAndLog(bot, msg)
 	}
 
-	// Отвечаем на callback (через Request, а не через SendAndLog!)
 	callback := tgbotapi.NewCallback(update.CallbackQuery.ID, "")
 	if _, err := bot.Request(callback); err != nil {
-		log.Printf("Ошибка отправки callback: %v", err)
+		log.Printf("failed to answer callback: %v", err)
 	}
-
 }
 
-// pickSpeaker обрабатывает выбор спикера и запрашивает город и дату обучения
 func pickSpeaker(data string, bot *tgbotapi.BotAPI, chatID int64, update tgbotapi.Update) {
 	idx, _ := strconv.Atoi(strings.TrimPrefix(data, "speaker_"))
 	speaker := Speakers[idx].Name
 	user := update.CallbackQuery.From
-	// Сохраняем спикера
+
 	err := db.UpsertUser(
 		dbConn,
 		chatID,
-		"", // телефон не меняем
-		user.FirstName+" "+user.LastName,
-		"", // город не меняем
+		"",
+		strings.TrimSpace(user.FirstName+" "+user.LastName),
+		"",
 		speaker,
 	)
 	if err != nil {
-		log.Println("Ошибка сохранения куратора:", err)
+		log.Println("failed to update user speaker:", err)
 	}
-	msg := tgbotapi.NewMessage(chatID, "В каком городе и когда ты хочешь пройти обучение?")
+
+	msg := tgbotapi.NewMessage(chatID, speakerPromptMessage)
 	msg.ReplyMarkup = CourseKeyboard(idx)
 	tools.SendAndLog(bot, msg)
+
+	setSessionCourse(chatID, speaker, "")
 }
 
-// pickCourse обрабатывает выбор курса и отправляет информацию о программе
 func pickCourse(data string, bot *tgbotapi.BotAPI, chatID int64, update tgbotapi.Update) {
 	parts := strings.Split(strings.TrimPrefix(data, "course_"), "_")
+	if len(parts) < 2 {
+		return
+	}
+
 	speakerIdx, _ := strconv.Atoi(parts[0])
 	courseIdx, _ := strconv.Atoi(parts[1])
+
 	course := Speakers[speakerIdx].Courses[courseIdx]
 	city := course.City
 	user := update.CallbackQuery.From
 
-	// Сохраняем город
 	err := db.UpsertUser(
 		dbConn,
 		chatID,
-		"", // телефон не меняем
-		user.FirstName+" "+user.LastName,
+		"",
+		strings.TrimSpace(user.FirstName+" "+user.LastName),
 		city,
-		"", // куратор не меняем
+		"",
 	)
 	if err != nil {
-		log.Println("Ошибка сохранения города:", err)
+		log.Println("failed to update user city:", err)
 	}
 
-	// Сохраняем имя папки спикера для этого пользователя
 	programPath := strings.TrimPrefix(course.Program, "/")
 	speakerDir := programPath
 	if strings.Contains(programPath, "/") {
@@ -133,18 +154,25 @@ func pickCourse(data string, bot *tgbotapi.BotAPI, chatID int64, update tgbotapi
 	}
 	userSpeakerDir[chatID] = speakerDir
 
-	// Отправляем заголовок
-	header := tgbotapi.NewMessage(chatID, "Вот полная программа курса 👇")
+	courseTitle := strings.TrimSpace(course.City)
+	if courseTitle == "" {
+		courseTitle = "курс"
+	}
+
+	header := tgbotapi.NewMessage(chatID, fmt.Sprintf(courseHeaderTemplate, courseTitle))
 	tools.SendAndLog(bot, header)
 
-	// Отправляем саму программу (текст или файл)
-	err = tools.SendCourseProgram(bot, chatID, course.Program)
-	if err != nil {
-		log.Print("Ошибка отправки программы курса:", err)
+	if err := tools.SendCourseProgram(bot, chatID, course.Program); err != nil {
+		log.Printf("failed to send course program: %v", err)
 		return
 	}
 
-	msg := tgbotapi.NewMessage(chatID, "Выберите действие:")
+	msg := tgbotapi.NewMessage(chatID, nextStepMessage)
 	msg.ReplyMarkup = CourseActionKeyboard()
 	tools.SendAndLog(bot, msg)
+
+	speakerName := Speakers[speakerIdx].Name
+	setSessionCourse(chatID, speakerName, city)
+
+	trySyncBitrixDeal(bot, chatID)
 }

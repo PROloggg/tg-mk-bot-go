@@ -68,3 +68,15 @@ func GetAllUsers(db *sql.DB) ([]User, error) {
 	}
 	return users, nil
 }
+
+func GetUserByChatID(db *sql.DB, chatID int64) (*User, error) {
+	row := db.QueryRow("SELECT chat_id, phone, fio, city, speaker, date FROM users WHERE chat_id = ?", chatID)
+	var u User
+	if err := row.Scan(&u.ChatID, &u.Phone, &u.Fio, &u.City, &u.Speaker, &u.Date); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &u, nil
+}

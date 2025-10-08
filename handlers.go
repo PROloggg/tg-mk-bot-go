@@ -14,10 +14,10 @@ var userSpeakerDir = make(map[int64]string)
 
 const (
 	bookCourseInfoPath         = "data/Инструкция по бронированию.txt"
-	greetingMessage            = "Привет! 👋\nЯ помогу тебе выбрать лучший курс.\nВыбери, что интересно, и мы сразу подберём варианты!"
-	contactConfirmationMessage = "Спасибо! 📲 Мы записали твой номер, менеджер скоро свяжется."
-	speakerPromptMessage       = "Отличный выбор! 🎯\nТеперь выбери город 📍\nГде тебе будет удобно заниматься?"
-	courseHeaderTemplate       = "Отправляю программу курса «%s» — посмотри материалы ниже."
+	greetingMessage            = "Привет! 👋\nЯ помогу выбрать лучший курс😌\nВыбери, что интересно, и мы сразу подберём варианты!"
+	contactConfirmationMessage = "Спасибо! 📲 Мы записали ваш номер,\nМенеджер скоро с вами свяжется."
+	speakerPromptTemplate      = "Отличный выбор, %s! 🎯\nТеперь выбери город 🌇\nГде тебе будет удобно заниматься?"
+	courseHeaderTemplate       = "Отправляю программу курса «%s»"
 	nextStepMessage            = "Что делаем дальше?"
 	bookCourseFallbackMessage  = "Не удалось найти информацию о бронировании курса. Напишите нам, пожалуйста."
 )
@@ -113,7 +113,7 @@ func pickSpeaker(data string, bot *tgbotapi.BotAPI, chatID int64, update tgbotap
 		log.Println("failed to update user speaker:", err)
 	}
 
-	msg := tgbotapi.NewMessage(chatID, speakerPromptMessage)
+	msg := tgbotapi.NewMessage(chatID, fmt.Sprintf(speakerPromptTemplate, speaker))
 	msg.ReplyMarkup = CourseKeyboard(idx)
 	tools.SendAndLog(bot, msg)
 
@@ -154,12 +154,14 @@ func pickCourse(data string, bot *tgbotapi.BotAPI, chatID int64, update tgbotapi
 	}
 	userSpeakerDir[chatID] = speakerDir
 
+	speakerName := Speakers[speakerIdx].Name
 	courseTitle := strings.TrimSpace(course.City)
 	if courseTitle == "" {
 		courseTitle = "курс"
 	}
 
-	header := tgbotapi.NewMessage(chatID, fmt.Sprintf(courseHeaderTemplate, courseTitle))
+	courseDisplay := fmt.Sprintf("%s — %s", speakerName, courseTitle)
+	header := tgbotapi.NewMessage(chatID, fmt.Sprintf(courseHeaderTemplate, courseDisplay))
 	tools.SendAndLog(bot, header)
 
 	if err := tools.SendCourseProgram(bot, chatID, course.Program); err != nil {
@@ -171,7 +173,6 @@ func pickCourse(data string, bot *tgbotapi.BotAPI, chatID int64, update tgbotapi
 	msg.ReplyMarkup = CourseActionKeyboard()
 	tools.SendAndLog(bot, msg)
 
-	speakerName := Speakers[speakerIdx].Name
 	setSessionCourse(chatID, speakerName, city)
 
 	trySyncBitrixDeal(bot, chatID)

@@ -22,36 +22,47 @@ import (
 )
 
 const (
+	// Идентификатор типа сущности смарт-процесса в Bitrix24 (SPA)
 	bitrixSpaEntityTypeID = 1050
-	bitrixSourceID        = "TELEGRAM"
-	bitrixSourceDesc      = "Telegram"
-	bitrixAssignedUserID  = 35
+
+	// Источник лида/элемента в Bitrix24
+	bitrixSourceID   = "TELEGRAM"
+	bitrixSourceDesc = "Telegram"
+
+	// Ответственный в Bitrix24 по умолчанию
+	bitrixAssignedUserID = 35
 )
 
 var (
+	// ленивое создание HTTP-клиента Bitrix24
 	bitrixClientOnce sync.Once
 	bitrixClientInst *BitrixClient
 	bitrixClientErr  error
 
+	// защита от повторной синхронизации одного и того же чата
 	bitrixSyncMu sync.Mutex
 	bitrixSynced = make(map[int64]bool)
 
+	// in-memory состояние чатов для накопления данных перед синком
 	chatStateMu sync.Mutex
 	chatStates  = make(map[int64]*bitrixSession)
 )
 
+// BitrixClient инкапсулирует базовый URL и HTTP-клиент для запросов к Bitrix24
 type BitrixClient struct {
 	baseURL    string
 	httpClient *http.Client
 }
 
+// bitrixSession - временное состояние чата до синхронизации в Bitrix24
 type bitrixSession struct {
-	Phone       string
-	SpeakerName string
-	City        string
-	ContactName string
+	Phone       string // номер телефона клиента (в свободной форме, нормализуем позже)
+	SpeakerName string // имя спикера/курса (если есть)
+	City        string // город проведения (если есть)
+	ContactName string // имя контакта
 }
 
+// getBitrixClient возвращает синглтон клиента Bitrix24, используя переменную окружения B24_BASE
 func getBitrixClient() (*BitrixClient, error) {
 	bitrixClientOnce.Do(func() {
 		base := strings.TrimRight(os.Getenv("B24_BASE"), "/")
@@ -69,7 +80,11 @@ func getBitrixClient() (*BitrixClient, error) {
 	return bitrixClientInst, bitrixClientErr
 }
 
+// trySyncBitrixDeal пытается единожды синхронизировать контакт и элемент SPA в Bitrix24
+// когда накоплены необходимые данные в сессии: телефон и город.
+// Функция безопасна к повторным вызовам - второй раз для того же чата синхронизация не запускается.
 func trySyncBitrixDeal(bot *tgbotapi.BotAPI, chatID int64) {
+	// проверка на уже выполненный синк
 	bitrixSyncMu.Lock()
 	if bitrixSynced[chatID] {
 		bitrixSyncMu.Unlock()
@@ -77,6 +92,7 @@ func trySyncBitrixDeal(bot *tgbotapi.BotAPI, chatID int64) {
 	}
 	bitrixSyncMu.Unlock()
 
+	// берём срез (snapshot) состояния
 	session := snapshotSession(chatID)
 	if session == nil {
 		return
@@ -85,28 +101,37 @@ func trySyncBitrixDeal(bot *tgbotapi.BotAPI, chatID int64) {
 	phone := strings.TrimSpace(session.Phone)
 	courseCity := strings.TrimSpace(session.City)
 	if phone == "" || courseCity == "" {
+		// без телефона или города смысла синкать нет - ждём, пока появятся
 		return
 	}
 
+	// нормализуем телефон до международного формата +7XXXXXXXXXX
 	formattedPhone, err := normalizePhone(phone)
 	if err != nil {
 		log.Printf("bitrix: phone normalization error (%s): %v", phone, err)
-		msg := tgbotapi.NewMessage(chatID, "РќРµ СѓРґР°Р»РѕСЃСЊ РѕР±СЂР°Р±РѕС‚Р°С‚СЊ РЅРѕРјРµСЂ С‚РµР»РµС„РѕРЅР°. РџСЂРѕРІРµСЂСЊ С„РѕСЂРјР°С‚ Рё РїРѕРїСЂРѕР±СѓР№ СЃРЅРѕРІР°.")
+		msg := tgbotapi.NewMessage(
+			chatID,
+			"Не удалось распознать номер телефона. Введите номер в международном формате, например +79991234567.",
+		)
 		tools.SendAndLog(bot, msg)
 		return
 	}
 
+	// инициализируем клиента Bitrix24
 	client, err := getBitrixClient()
 	if err != nil {
 		log.Printf("bitrix: init error: %v", err)
-		msg := tgbotapi.NewMessage(chatID, "РќРµ СѓРґР°Р»РѕСЃСЊ РїРѕРґРєР»СЋС‡РёС‚СЊСЃСЏ Рє Bitrix24. РџРѕРїСЂРѕР±СѓР№С‚Рµ РїРѕР·Р¶Рµ.")
+		msg := tgbotapi.NewMessage(
+			chatID,
+			"Не удалось подключиться к Bitrix24. Попробуйте позже.",
+		)
 		tools.SendAndLog(bot, msg)
 		return
 	}
 
 	contactName := strings.TrimSpace(session.ContactName)
 	if contactName == "" {
-		contactName = "РљР»РёРµРЅС‚ Telegram"
+		contactName = "Пользователь Telegram"
 	}
 
 	courseTitle := buildCourseTitle(session)
@@ -114,14 +139,19 @@ func trySyncBitrixDeal(bot *tgbotapi.BotAPI, chatID int64) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
+	// создаём/находим контакт и создаём элемент SPA
 	contactID, itemID, err := client.syncDeal(ctx, formattedPhone, contactName, courseTitle)
 	if err != nil {
 		log.Printf("bitrix: sync error for chat %d: %v", chatID, err)
-		msg := tgbotapi.NewMessage(chatID, "РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕС…СЂР°РЅРёС‚СЊ РґР°РЅРЅС‹Рµ РІ Bitrix24. РњС‹ СѓР¶Рµ СЂР°Р·Р±РёСЂР°РµРјСЃСЏ, РїРѕРїСЂРѕР±СѓР№ С‡СѓС‚СЊ РїРѕР·Р¶Рµ.")
+		msg := tgbotapi.NewMessage(
+			chatID,
+			"Не удалось синхронизировать данные с Bitrix24. Попробуйте позже.",
+		)
 		tools.SendAndLog(bot, msg)
 		return
 	}
 
+	// помечаем чат как синхронизированный
 	bitrixSyncMu.Lock()
 	bitrixSynced[chatID] = true
 	bitrixSyncMu.Unlock()
@@ -129,12 +159,13 @@ func trySyncBitrixDeal(bot *tgbotapi.BotAPI, chatID int64) {
 	log.Printf("bitrix: synced contact %s and item %s for chat %d", contactID, itemID, chatID)
 }
 
+// buildCourseTitle собирает заголовок курса из спикера и города
 func buildCourseTitle(session *bitrixSession) string {
 	speaker := strings.TrimSpace(session.SpeakerName)
 	city := strings.TrimSpace(session.City)
 	switch {
 	case speaker != "" && city != "":
-		return speaker + " - " + city
+		return fmt.Sprintf("%s - %s", speaker, city)
 	case city != "":
 		return city
 	case speaker != "":
@@ -144,6 +175,9 @@ func buildCourseTitle(session *bitrixSession) string {
 	}
 }
 
+// normalizePhone приводит произвольный ввод в международный формат с префиксом "+"
+// Поддерживает кейсы: 10 цифр -> добавляем 7, 11 цифр с 8 -> заменяем на 7.
+// Возвращает ошибку при недостаточной длине.
 func normalizePhone(raw string) (string, error) {
 	var digits []rune
 	for _, r := range raw {
@@ -172,6 +206,7 @@ func normalizePhone(raw string) (string, error) {
 	return "+" + value, nil
 }
 
+// syncDeal выполняет полный цикл: поиск/создание контакта и создание элемента смарт-процесса
 func (c *BitrixClient) syncDeal(ctx context.Context, phone, name, courseTitle string) (string, string, error) {
 	contactID, err := c.findOrCreateContact(ctx, phone, name)
 	if err != nil {
@@ -186,6 +221,7 @@ func (c *BitrixClient) syncDeal(ctx context.Context, phone, name, courseTitle st
 	return contactID, itemID, nil
 }
 
+// findOrCreateContact пытается найти контакт по телефону, иначе создаёт новый
 func (c *BitrixClient) findOrCreateContact(ctx context.Context, phone, name string) (string, error) {
 	if id, err := c.findContact(ctx, phone); err != nil {
 		return "", err
@@ -195,6 +231,7 @@ func (c *BitrixClient) findOrCreateContact(ctx context.Context, phone, name stri
 	return c.createContact(ctx, phone, name)
 }
 
+// findContact ищет контакт в Bitrix24 по номеру телефона
 func (c *BitrixClient) findContact(ctx context.Context, phone string) (string, error) {
 	payload := map[string]any{
 		"filter": map[string]string{
@@ -219,6 +256,7 @@ func (c *BitrixClient) findContact(ctx context.Context, phone string) (string, e
 	return response.Result[0].ID, nil
 }
 
+// createContact создаёт новый контакт в Bitrix24
 func (c *BitrixClient) createContact(ctx context.Context, phone, name string) (string, error) {
 	payload := map[string]any{
 		"fields": map[string]any{
@@ -254,6 +292,7 @@ func (c *BitrixClient) createContact(ctx context.Context, phone, name string) (s
 	}
 }
 
+// createSpaItem создаёт элемент смарт-процесса (SPA) и привязывает к нему контакт
 func (c *BitrixClient) createSpaItem(ctx context.Context, contactID, courseTitle string) (string, error) {
 	idInt, err := strconv.Atoi(contactID)
 	if err != nil {
@@ -263,7 +302,8 @@ func (c *BitrixClient) createSpaItem(ctx context.Context, contactID, courseTitle
 	payload := map[string]any{
 		"entityTypeId": bitrixSpaEntityTypeID,
 		"fields": map[string]any{
-			"title":             fmt.Sprintf("РћРїР»Р°С‚Р° РёР· Telegram вЂ” РєСѓСЂСЃ %s", courseTitle),
+			// В заголовке избегаем длинного тире, используем короткий дефис
+			"title":             fmt.Sprintf("Telegram - %s", courseTitle),
 			"opened":            "Y",
 			"contactIds":        []int{idInt},
 			"sourceId":          bitrixSourceID,
@@ -295,6 +335,7 @@ func (c *BitrixClient) createSpaItem(ctx context.Context, contactID, courseTitle
 	}
 }
 
+// post выполняет POST-запрос к REST-методу Bitrix24, обрабатывает HTTP и бизнес-ошибки, распаковывает ответ в out
 func (c *BitrixClient) post(ctx context.Context, endpoint string, payload any, out any) error {
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -306,7 +347,7 @@ func (c *BitrixClient) post(ctx context.Context, endpoint string, payload any, o
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", "application/json; charset=utf-8")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -324,6 +365,7 @@ func (c *BitrixClient) post(ctx context.Context, endpoint string, payload any, o
 		return fmt.Errorf("bitrix http %d", resp.StatusCode)
 	}
 
+	// обработка ошибок формата {"error": "...", "error_description": "..."}
 	var apiErr struct {
 		Error            string `json:"error"`
 		ErrorDescription string `json:"error_description"`
@@ -341,6 +383,7 @@ func (c *BitrixClient) post(ctx context.Context, endpoint string, payload any, o
 	return nil
 }
 
+// snapshotSession делает копию состояния чата, чтобы избежать гонок при чтении
 func snapshotSession(chatID int64) *bitrixSession {
 	chatStateMu.Lock()
 	defer chatStateMu.Unlock()
@@ -352,6 +395,7 @@ func snapshotSession(chatID int64) *bitrixSession {
 	return &copy
 }
 
+// updateSession безопасно модифицирует состояние чата
 func updateSession(chatID int64, fn func(*bitrixSession)) {
 	chatStateMu.Lock()
 	defer chatStateMu.Unlock()
@@ -363,6 +407,7 @@ func updateSession(chatID int64, fn func(*bitrixSession)) {
 	fn(state)
 }
 
+// setSessionContact записывает телефон и имя контакта в сессию чата
 func setSessionContact(chatID int64, phone, contactName string) {
 	updateSession(chatID, func(s *bitrixSession) {
 		if phone != "" {
@@ -374,6 +419,7 @@ func setSessionContact(chatID int64, phone, contactName string) {
 	})
 }
 
+// setSessionCourse записывает данные о курсе/событии в сессию чата
 func setSessionCourse(chatID int64, speaker, city string) {
 	updateSession(chatID, func(s *bitrixSession) {
 		if speaker != "" {
